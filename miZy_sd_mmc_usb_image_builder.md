@@ -6,6 +6,20 @@ Its just a part or miZy project, and same as other our parts can standalone used
 
 This perl script no need any libs or another deps
 
+# USAGE
+
+help
+
+    ./miZy_sd_mmc_usb_image_builder --help
+
+common usage for 8M image, output to firmwares/orange\_pi\_zero\_hyphop\_mizy\_sd\_mmc\_usb\_demo-8M.bin
+
+    ./miZy_sd_mmc_usb_image_builder
+
+custom config
+
+    ./miZy_spi_image_builder miZy-custom.conf
+
 # CONFIG FILE
 
 default config
