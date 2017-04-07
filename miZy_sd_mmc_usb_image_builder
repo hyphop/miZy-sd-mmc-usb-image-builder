@@ -1,0 +1,397 @@
+#!/usr/bin/perl
+
+## hyphop ##
+
+=head1 ABOUT miZy_sd_mmc_usb_image_builder
+
+SD/MMC/USB firmware image builder (for sunxi Orange Pi Zero, another sunxi boards maybe work too )
+
+Its just a part or miZy project, and same as other our parts can standalone used
+
+This perl script no need any libs or another deps
+
+=head1 CONFIG FILE
+
+default config
+
+    miZy_sd_mmc_usb_image_builder.conf
+
+config file its a same pure perl code!
+
+=head1 PATHS
+    
+put your files (uboot scripts env fex/dtc kernel squashfs initramfs userdata) in @SCAN_PATH dirs
+by default are
+
+    .
+    ./bin
+    ./bin.local
+
+=head1 miZy
+
+tiny fast embedded linux, for sunxi Orange Pi Zero (and maybe other boards) and mods.
+Now under active development, but is usable already )
+
+=head1 LINKS
+
+=over
+
+=item *
+L<https://hyphop.github.io/mizy/>
+
+=item *
+L<https://github.com/hyphop/miZy-sd-mmc-usb-image-builder>
+
+=item *
+L<https://github.com/hyphop/miZy-spi-image-builder>
+
+=item *
+L<https://github.com/hyphop/miZy-uboot>
+
+=item *
+L<https://github.com/hyphop/miZy-linux-kernel>
+
+=back
+
+=cut
+
+our ( @SCAN_PATH, @IMG, $img_size, $img_name,
+    $NOW, $MMC_BS, $MMC_OFFSET,
+     );
+
+BEGIN {
+
+    select STDERR;
+    $|=1;
+    select STDOUT;
+    $|=1;
+    
+    ## developer part code 
+    our $NOW = localtime();
+    if ( ( join "" => @ARGV ) =~ /--md/ ) { 
+    `perldoc -o Markdown "$0" > "$0.md"`; exit 0 }
+    if ( ( join " " => @ARGV ) =~ /(--push\s*)/ ) {
+	my $msg=$'; $msg||=$NOW;
+	`$0 --md; git add -A && git commit -m "$msg" && git push`;
+	exit 0;
+    }
+
+    ## real code start there
+    exec perldoc => $0 if ( join "" => @ARGV ) =~ /-{1,2}h(elp)?/;
+
+    our $CONF      = shift;
+    our $PROG      = $0;
+    our $PROG_NAME = $0;
+    $PROG_NAME =~ s{(.+/)}{}sg;
+    our $PROG_DIR = $1;
+    $CONF ||= "$PROG.conf";
+    warn "[i] $PROG_DIR $PROG_NAME => CONF: $CONF\n";
+
+    #    my $CONF_OK = eval { require $CONF };
+    do $CONF;
+    $CONF_OK = 1;
+
+    unless ($CONF_OK) {
+        warn "[e] bad config $CONF\n";
+        exit 1;
+    }
+
+}
+
+# use only for check
+# use common::sense;
+
+our $WARN = "";
+our $ERR  = 0;
+
+sub WARN {
+    #syswrite STDERR, join "" => @_;
+    $WARN .= join "" => @_;
+}
+
+sub DIE {
+    $ERR = shift;
+    warn @_;
+    die
+}
+
+END {
+    syswrite STDERR, $WARN;
+    syswrite STDERR, "ERR: $ERR\n" if $ERR;
+    exit $ERR;
+}
+
+$SIG{'__WARN__'} = \&WARN;
+
+sub getfile {
+    my $f;
+    my $r;
+    my $data;
+    $r = open $f, $_[0];
+    return undef unless $r;
+    my $l = -s $_[0];
+    $r = sysread $f, $data, $l;
+    warn "[i] readed $r($l) bytes from $_[0]\n";
+    return $data;
+}
+
+sub savefile {
+    my $f;
+    my $r = open $f, ">$_[1]";
+    return undef unless $r;
+    my $l = length $_[0];
+    $r = syswrite $f, $_[0], $l;
+    warn "[i] save $_[1] $l bytes\n";
+    return $r;
+}
+
+sub pad {
+
+    #$_[0], $_[1], $_[2];
+    my $l = length $_[0];
+    my $s = $_[1];
+    my $c = $_[2];
+    $c ||= "\x00";
+    my $p = $s - $l;
+    warn "[i] pad $l + $p => $s\n";
+    $_[0] . ${c} x $p
+
+}
+
+our %FILES = ();
+
+sub scan_file {
+    return $FILES{ $_[0] } if defined $FILES{ $_[0] };
+    local $_;
+    for (@SCAN_PATH) {
+        my $e = -f "$_/$_[0]";
+        if ($e) {
+            return $FILES{ $_[0] } = "$_/$_[0]";
+            break;
+        }
+    }
+    return undef;
+}
+
+sub cat {
+    my $s = "";
+    $s .= getfile( scan_file $_ ) for @_;
+
+    #    $s .= getfile($_) for @_;
+    return $s;
+}
+
+our $fstype = $ENV{fstype};
+#   $fstype //= 'vfat';
+    $fstype //= 'ext2';
+our $mkfs = "mkfs.$fstype";
+
+our $mizy_disk_id = "edfeedde"; # not change
+
+our $part_cnf_name = '8M';
+
+our $vol_name = "miZy_sd"; # not change
+our $vol_id = "feedfeed"; # not change
+
+our $tmp_dir = "/tmp/$vol_name.$$";
+mkdir $tmp_dir;
+
+our $mkfs_args="";
+
+$mkfs_args = "-n $vol_name -i $vol_id"	if $fstype eq 'vfat';
+$mkfs_args = "-L $vol_name -U " .  sprintf("%s-%04x-%04x-%04x-%012x",
+     $vol_id, 1,2,3,time ) 		if $fstype =~ m/ext/;
+
+warn "[i] mkfs args $mkfs_args\n";
+
+#~ dd if=/dev/zero bs=1M count=8 > mbr8
+#~ dd if=/dev/zero bs=1M count=16 > mbr16
+#~ dd if=/dev/zero bs=1M count=24 > mbr24
+
+#~ dd count=1 2>/dev/null < mbr8 | hd
+#~ dd count=1 2>/dev/null < mbr16 | hd
+#~ dd count=1 2>/dev/null < mbr24 | hd
+
+#~ dd count=1 2>/dev/null < mbr8 | hexdump  -e '8/1 "%02X "'
+
+#~ fdisk -l mbr8
+#~ fdisk -l mbr16
+#~ fdisk -l mbr24
+
+our $part_end = join "" => qw/
+00000000000000000000000000000000
+00000000000000000000000000000000
+00000000000000000000000000000000
+55aa
+/;
+
+our %mbr = (
+
+#~ 'def' => [
+#~ "\x00"x440 . 
+#~ pack "H*" => join "" => $mizy_disk_id => qw/
+#~ 0000
+#~ 00050501832524010040000000080000
+#~ 00000000000000000000000000000000
+#~ 00000000000000000000000000000000
+#~ 00000000000000000000000000000000
+#~ 55aa 
+#~ / ]
+
+# mbr + first part 8M offset + 8M size
+# 16384 * 512 = 8388608
+'8M' => [ 2048, 16384,
+"\x00"x440 . 
+pack "H*" => join "" => $mizy_disk_id => qw/
+0000
+00 20 21 00 83 05 04 01 00 08 00 00 00 38 00 00 
+/  => $part_end
+],
+# 32768 * 512 = 16777216
+'16M' => [ 2048, 32768,
+"\x00"x440 . 
+pack "H*" => join "" => $mizy_disk_id => qw/
+0000
+00 2021 00 83 0A 08 02 00 0800 00 00 78 00 00
+/  => $part_end
+],
+
+# 49152 * 512 = 25165824
+'24M' => [ 2048, 49152,
+"\x00"x440 . 
+pack "H*" => join "" => $mizy_disk_id => qw/
+0000
+00 2021 00 83 0F 0C 03 00 0800 00 00 B8 00 00 
+/  => $part_end
+]
+
+
+);
+
+sub mkimage_header {
+
+    # uboot script mkimake header
+    pack "H*" => join /\s+/ => qw/
+      27051956515b32295891963900000fc000000000000000009cfe4d7c0502060000000000
+      0000000000000000000000000000000000000000000000000000000000000fb800000000
+      /;
+}
+
+
+our $out = "";
+# add mbr + partition table + mmc_offset pad
+$out .= pad $mbr{$part_cnf_name}->[2] => $MMC_OFFSET;
+
+our $part_offset;
+
+#for my $part (@IMG) {
+{
+    my $part = shift @IMG;
+    my $ftype = shift @$part;
+    warn "[i] ADD $ftype ";
+    
+    # add uboot
+    if ( $ftype eq 'uboot' ) {
+        $out .=
+          pad cat(@$part) => $MMC_BS * $mbr{$part_cnf_name}->[0] - $MMC_OFFSET;
+
+	$part_offset = length $out;
+
+        $out .= pad "" => $MMC_BS *
+          ( $mbr{$part_cnf_name}->[1] - $mbr{$part_cnf_name}->[0] );
+	#last;
+    }
+
+#~     for my $file (@$part) {
+#~         my $filepath = scan_file($file);
+#~ 	warn "[i] ADD $filepath";
+#~     }
+
+}
+
+our $img_sd_name = sprintf $img_name, $part_cnf_name;
+
+savefile( $out => $img_sd_name );
+
+sub cmd {
+    my $cmd_line = join " " => @_;
+    warn "[SHELL CMD] $cmd_line\n";
+    unless ( $#_ ){
+	return `$cmd_line`
+    }
+    system(@_) == 0 or DIE 5 => "[E] [SHELL CMD] $cmd_line";
+}
+
+our $loop_dev=`losetup --show -f -o $part_offset $img_sd_name`;
+chomp $loop_dev;
+
+#cmd $mkfs => split(/\s+/ => $mkfs_args), $loop_dev;
+cmd "$mkfs $mkfs_args $loop_dev";
+cmd mount => $loop_dev, $tmp_dir;
+cmd mkdir => "-p", "$tmp_dir/$BOOT_DIR";
+
+for my $part (@IMG) {
+    my $ftype = shift @$part;
+    for my $filename (@$part) {
+	#warn "[ADD] $filename => $filepath\n";
+
+	my $filepath = scan_file($filename);
+
+        if ( $ftype eq "script" ) {
+
+	    savefile(
+		pad( mkimage_header() . getfile( $filepath ) => $script_padded_size => "\x00" )
+		, "$tmp_dir/$BOOT_DIR/$BOOT_SCRIPT"
+	    )
+
+	}
+
+	cmd cp => $filepath, "$tmp_dir/$BOOT_DIR";
+	
+	our $env_link = $env_vars{$ftype};
+
+	if ( $env_link ) {
+		warn " >> $env_link->[0] = $env_link->[1] => $filename \n";
+		cmd ln => '-s'  => $filename => "$tmp_dir/$env_link->[1]";
+	}
+
+#~ load mmc 0:1 /boot/script.bin + /boot/uInitrd + /boot/uImage
+#~ ** File not found /boot/script.bin **
+#~ ** File not found /boot/uImage **
+#~ ** File not found /boot/uInitrd **
+
+
+    }
+}
+
+warn "[CHECK] " . `blkid | grep $vol_name`;
+#warn "[CHECK]\n" . `find $tmp_dir -exec echo "	{}" \\\;`;
+warn "[CHECK]\n" . `find $tmp_dir -type d -exec ls -l1 {} \\\;`;
+
+#~ `cat ./README.md > $tmp_dir/README.md`;
+#~ `cat ./LICENSE > $tmp_dir/LICENSE`;
+#~ `ln -s LICENSE '$tmp_dir/## hyphop ##' || cp '## hyphop ##' $tmp_dir`;
+
+#~ while ( $_ = shift @ARGV ) {
+#~     if ( -f $_ ) {
+#~ 	m{.+/};
+#~ 	warn "[i] add $_ to $tmp_dir/$'\n";
+#~ 	`cp "$_" "$tmp_dir/$'"`;
+#~     }
+#~ }
+
+cmd umount => $loop_dev;
+cmd losetup => '-d', $loop_dev;
+
+system rmdir => $tmp_dir;
+
+__END__
+
+#	  / 83h -linux / 0Ch - fat32 / 0Eh - fat16
+#__======PT------........++++++++
+#00050501832524010040000000080000
+#		 |       '--------- Number of sectors in partition
+#                 \_ LBA of first absolute sector in the partition
+#         
+
+#16777216 / 512 = 32768

@@ -1,0 +1,6 @@
+bin/*
+bin.local/*
+out/*
+tmp
+firmwares/*.bin
+docs

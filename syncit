@@ -1,0 +1,7 @@
+#!/bin/sh
+rsync -av $@ \
+    --exclude=bin/ \
+    --exclude=firmwares/*.bin \
+    --exclude=tmp/* \
+    * \
+    /mnt/1024-temp/githup/hyphop/miZy-sd-mmc-usb-image-builder
