@@ -20,6 +20,11 @@ common usage for 8M image, output to firmwares/orange_pi_zero_hyphop_mizy_sd_mmc
 
     ./miZy_sd_mmc_usb_image_builder
 
+    or 
+
+    size=16M ./miZy_sd_mmc_usb_image_builder
+
+
 custom config
 
     ./miZy_spi_image_builder miZy-custom.conf
@@ -40,6 +45,16 @@ by default are
     .
     ./bin
     ./bin.local
+
+=head1 WRITE IMAGE EXAMPLE
+
+write to SD card 
+    
+    ./tools/img2sd firmwares/orange_pi_zero_hyphop_mizy_sd_mmc_usb_demo-8M.bin yes
+
+or write to USB 
+
+    ./tools/img2usb firmwares/orange_pi_zero_hyphop_mizy_sd_mmc_usb_demo-8M.bin yes
 
 =head1 miZy
 
@@ -70,7 +85,7 @@ L<https://github.com/hyphop/miZy-linux-kernel>
 =cut
 
 our ( @SCAN_PATH, @IMG, $img_size, $img_name,
-    $NOW, $MMC_BS, $MMC_OFFSET,
+    $NOW, $MMC_BS, $MMC_OFFSET, $loop_dev, $tmp_dir
      );
 
 BEGIN {
@@ -122,7 +137,8 @@ our $ERR  = 0;
 
 sub WARN {
     #syswrite STDERR, join "" => @_;
-    $WARN .= join "" => @_;
+    warn @_
+    #$WARN .= join "" => @_;
 }
 
 sub DIE {
@@ -132,7 +148,9 @@ sub DIE {
 }
 
 END {
-    syswrite STDERR, $WARN;
+    end_fs();
+#    syswrite STDERR, "==\n";
+#    syswrite STDERR, $WARN;
     syswrite STDERR, "ERR: $ERR\n" if $ERR;
     exit $ERR;
 }
@@ -204,12 +222,10 @@ our $mkfs = "mkfs.$fstype";
 
 our $mizy_disk_id = "edfeedde"; # not change
 
-our $part_cnf_name = '8M';
-
 our $vol_name = "miZy_sd"; # not change
 our $vol_id = "feedfeed"; # not change
 
-our $tmp_dir = "/tmp/$vol_name.$$";
+$tmp_dir = "/tmp/$vol_name.$$";
 mkdir $tmp_dir;
 
 our $mkfs_args="";
@@ -284,6 +300,12 @@ pack "H*" => join "" => $mizy_disk_id => qw/
 
 );
 
+our $part_cnf_name = $ENV{size};
+    undef $part_cnf_name unless defined $mbr{$part_cnf_name};
+    $part_cnf_name //= '16M';
+
+warn "[i] image part size $part_cnf_name\n";
+
 sub mkimage_header {
 
     # uboot script mkimake header
@@ -338,7 +360,7 @@ sub cmd {
     system(@_) == 0 or DIE 5 => "[E] [SHELL CMD] $cmd_line";
 }
 
-our $loop_dev=`losetup --show -f -o $part_offset $img_sd_name`;
+$loop_dev=`losetup --show -f -o $part_offset $img_sd_name`;
 chomp $loop_dev;
 
 #cmd $mkfs => split(/\s+/ => $mkfs_args), $loop_dev;
@@ -361,14 +383,15 @@ for my $part (@IMG) {
 	    )
 
 	}
-
+	
 	cmd cp => $filepath, "$tmp_dir/$BOOT_DIR";
 	
 	our $env_link = $env_vars{$ftype};
 
 	if ( $env_link ) {
 		warn " >> $env_link->[0] = $env_link->[1] => $filename \n";
-		cmd ln => '-s'  => $filename => "$tmp_dir/$env_link->[1]";
+		#cmd ln => '-s'  => $filename => "$tmp_dir/$env_link->[1]";
+		symlink $filename => "$tmp_dir/$env_link->[1]";
 	}
 
 #~ load mmc 0:1 /boot/script.bin + /boot/uInitrd + /boot/uImage
@@ -396,11 +419,13 @@ warn "[CHECK]\n" . `find $tmp_dir -type d -exec ls -l1 {} \\\;`;
 #~     }
 #~ }
 
+
+sub end_fs {
 cmd umount => $loop_dev;
 cmd losetup => '-d', $loop_dev;
 
 system rmdir => $tmp_dir;
-
+}
 __END__
 
 #	  / 83h -linux / 0Ch - fat32 / 0Eh - fat16

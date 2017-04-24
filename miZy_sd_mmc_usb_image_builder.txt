@@ -17,6 +17,10 @@ USAGE
 
         ./miZy_sd_mmc_usb_image_builder
 
+        or 
+
+        size=16M ./miZy_sd_mmc_usb_image_builder
+
     custom config
 
         ./miZy_spi_image_builder miZy-custom.conf
@@ -35,6 +39,15 @@ PATHS
         .
         ./bin
         ./bin.local
+
+WRITE IMAGE EXAMPLE
+    write to SD card
+
+        ./tools/img2sd firmwares/orange_pi_zero_hyphop_mizy_sd_mmc_usb_demo-8M.bin yes
+
+    or write to USB
+
+        ./tools/img2usb firmwares/orange_pi_zero_hyphop_mizy_sd_mmc_usb_demo-8M.bin yes
 
 miZy
     tiny fast embedded linux, for sunxi Orange Pi Zero (and maybe other

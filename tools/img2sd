@@ -1,0 +1,49 @@
+#!/bin/sh
+
+## hyphop ##
+
+usage() { echo "
+$0 - write image file to SD or USB flash drive
+
+USAGE:
+
+    $0 image_name.bin yes
+    dev=/dev/mmc0 $0 image_name.bin yes
+
+";}
+
+[ "$1" = "--help" ] && { usage; exit 1 ; }
+[ "$1" = "" ] && { usage; echo "[e] undef image $1"; exit 1 ; }
+[ -f $1 ] || {  usage; echo "[e] not found image $1"; exit 1 ; }
+
+[ "$dev" = "" ] && {
+
+case $0 in 
+    *usb)
+	for dev in /dev/disk/by-id/usb-*:0 ; do
+#	    echo $dev;
+	    break
+	done
+    ;;
+    *sd)
+	dev=/dev/disk/by-id/mmc-*
+    ;;
+    *)
+	echo "[i] undef dev type";
+	exit 0 
+    ;;
+esac
+
+}
+
+[ -b $dev ] || { echo "[e] undef dev $dev"; exit 1 ; }
+
+cmd="dd of=$dev bs=65536 if=$1"
+
+echo $cmd
+
+[ "$2" = "yes" ] || { usage; exit 1 ; }
+
+$cmd
+
+sync
